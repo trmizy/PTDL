@@ -63,18 +63,13 @@ df_cleaned = df_cleaned.withColumn(
     "Ten_Tac_Gia", 
     regexp_replace(col("Ten_Tac_Gia"), "Thu Giang Nguyễn Duy Cần", "Thu Giang, Nguyễn Duy Cần")
 )
+#Chuyển dổi kiểu dữ liệu theo mô hình hóa dữ liệu
+df_cleaned = df_cleaned.withColumn("Nam_XB", col("Nam_XB").cast(IntegerType())) \
+                       .withColumn("Trong_Luong", regexp_replace(col("Trong_Luong"), "[grg]", "").cast(IntegerType())) \
+                       .withColumn("So_Trang", col("So_Trang").cast(IntegerType()))
 
-# Xóa "Chủ tịch-CEO và chó hoang được cứu Sadie" khỏi "Scott MacDonald"
-df_cleaned = df_cleaned.withColumn(
-    "Ten_Tac_Gia", 
-    regexp_replace(col("Ten_Tac_Gia"), " Scott MacDonald Chủ tịch-CEO và chó hoang được cứu Sadie", "Scott MacDonald")
-)
 
-# Xóa "Phỏng Theo Tác Phẩm Gốc Của" khỏi "Antoine de Saint-Exupéry"
-df_cleaned = df_cleaned.withColumn(
-    "Ten_Tac_Gia", 
-    regexp_replace(col("Ten_Tac_Gia"), "Phỏng Theo Tác Phẩm Gốc Của ", "")
-)
+#########################POSTGRES##############################
 # Bước 9: Tách "Ten_Tac_Gia" thành các giá trị riêng biệt
 df_split_authors = df_cleaned.withColumn("author", explode(split(col("Ten_Tac_Gia"), "[,-]"))) \
     .select(trim(col("author")).alias("author_name")).distinct()
@@ -130,7 +125,7 @@ df_author_mapping = df_with_author_ids.join(
     authors_with_id_df.select("author_id", "author_name"),
     trim(col("cleaned_author_name")) == trim(authors_with_id_df.author_name),
     "left"
-).groupBy("SKU").agg(expr("collect_list(author_id) as author_ids"))
+).groupBy("SKU").agg(expr("collect_list(author_id) as author_ids")).distinct()
 
 # Bước 14: Chuẩn bị dữ liệu cho bảng 'sach'
 # Chuẩn bị dữ liệu cho bảng 'sach'
@@ -167,6 +162,16 @@ df_books_filtered.write.jdbc(
     url=postgres_url,
     table="sach",
     mode="append",  # Chỉ thêm bản ghi mới không bị trùng lặp
+    properties=postgres_properties
+)
+df_author_mapping1 = df_books.select("SKU", explode(col("author_ids")).alias("author_id"))
+
+# Lưu dữ liệu vào bảng sach_tac_gia trong PostgreSQL
+df_cleaned = df_author_mapping1.dropDuplicates(["SKU", "author_id"]) 
+df_cleaned.write.jdbc(
+    url=postgres_url,
+    table="sach_tac_gia",
+    mode="append",  # Bỏ qua những bản ghi đã tồn tại
     properties=postgres_properties
 )
 
