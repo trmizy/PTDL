@@ -14,6 +14,26 @@ from scrapy.exceptions import DropItem
 import os
 import re
 
+
+class MongoDBBookStore:
+    def __init__(self):
+        # Connection String
+        econnect = str(os.environ['Mongo_HOST'])# TAO MOT BIEN MOI TRUONG
+        #self.client = pymongo.MongoClient('mongodb://mymongodb:27017')
+        self.client = pymongo.MongoClient('mongodb://'+econnect+':27017')#NETWORK  neu muon port thi khai bao bien moi
+        self.db = self.client['dbmybook'] #Create Database      
+        pass
+    
+    def process_item(self, item, spider):
+        
+        collection =self.db['tblbook'] #Create Collection or Table
+        try:
+            collection.insert_one(dict(item))
+            return item
+        except Exception as e:
+            raise DropItem(f"Error inserting item: {e}")       
+        pass
+
 class JsonDBBookStore:
     def __init__(self):
         self.first_item = True  # Theo dõi xem đây có phải là mục đầu tiên hay không
