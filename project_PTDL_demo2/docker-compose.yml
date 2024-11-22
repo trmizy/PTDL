@@ -1,0 +1,143 @@
+version: '3'
+services:
+  # MongoDB service
+  mongodb:
+    image: mongo:latest
+    container_name: mymongodb
+    ports:
+      - "27017:27017"
+    networks:
+      - kafka-network
+    command: ["mongod", "--replSet", "rs0"] 
+    #volumes:
+      #- mongo_data:/data/db #backup
+
+  # Zookeeper service (for Kafka)
+  zookeeper:
+    image: confluentinc/cp-zookeeper:6.2.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    networks:
+      - kafka-network
+
+  # Kafka service
+  kafka:
+    image: confluentinc/cp-kafka:6.2.0
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+    networks:
+      - kafka-network
+
+  # Kafka Connect
+  kafka-connect:
+    build: ./kafka-connect
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: "kafka:9092"
+      CONNECT_REST_ADVERTISED_HOST_NAME: "kafka-connect"
+      CONNECT_REST_PORT: 8083
+      CONNECT_GROUP_ID: "connect-cluster"
+      CONNECT_CONFIG_STORAGE_TOPIC: "connect-configs"
+      CONNECT_OFFSET_STORAGE_TOPIC: "connect-offsets"
+      CONNECT_STATUS_STORAGE_TOPIC: "connect-status"
+      CONNECT_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_REST_LISTENERS: "http://0.0.0.0:8083"
+      CONNECT_PLUGIN_PATH: "/usr/share/java"
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+    ports:
+      - "8083:8083"
+    networks:
+      - kafka-network
+
+  # BookStore service
+  bookstore:
+    image: imagecrawler
+    container_name: mycrawlerapp
+    depends_on:
+      - mongodb
+    networks:
+      - kafka-network
+      
+  # Spark service
+  spark_data:
+    image: clean
+    depends_on:
+      - kafka
+      - kafka-connect
+      - mypostgres
+    networks:
+      - kafka-network
+
+  # PostgreSQL service
+  mypostgres:
+    image: postgres:latest
+    container_name: mypostgres
+    environment:
+      POSTGRES_DB: bookstore_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 12345
+    volumes:
+      - ./postgres.sql:/docker-entrypoint-initdb.d/postgres.sql   #tạo bảng
+      - ./postgres_data:/var/lib/postgresql/data                  # backup
+    ports:
+      - "5432:5432"
+    networks:
+      - kafka-network
+
+  # SQL Server service
+  mssql:
+    build:
+      context: .
+    container_name: mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: YourPassword123
+    ports:
+      - "1434:1433"
+    volumes:
+      - ./postgres_to_ssms/ssms_data.sql:/app/ssms_data.sql  #tạo bảng
+    networks:
+      - kafka-network
+    command: >
+      /bin/bash -c "
+      /opt/mssql/bin/sqlservr & sleep 20 &&
+      /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P YourPassword123 -i /app/ssms_data.sql &&
+      wait"
+      
+  # Postgre to SSMS service
+  postgre_to_ssms:
+    image: postgres-to-ssms:1.0.0
+    build:
+      context: ./postgres_to_ssms
+    depends_on:
+      - mypostgres
+      - mssql
+    environment:
+      POSTGRES_HOST: mypostgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: bookstore_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 12345
+      MSSQL_HOST: mssql
+      MSSQL_PORT: 1433
+      MSSQL_DB: Data_book_1
+      MSSQL_USER: sa
+      MSSQL_PASSWORD: YourPassword123
+    networks:
+      - kafka-network
+
+networks:
+  kafka-network:
+    driver: bridge
+
+volumes:
+  mongo_data:
+  postgres_data:
